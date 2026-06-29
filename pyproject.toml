@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tinca-tag"
+version = "0.1.0.dev0"
+description = "Scan-to-connect QR codes for ROS 2 robots, for the Tinca app."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Auri Labs", email = "hello@aurilabs.tech" }]
+keywords = ["ros2", "rosbridge", "foxglove", "qr", "tinca", "robotics"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = ["segno>=1.6"]
+
+[project.optional-dependencies]
+doctor = ["psutil>=5.9"]
+test = ["pytest>=8", "pytest-cov"]
+dev = ["tinca-tag[doctor,test]", "ruff>=0.6"]
+
+[project.scripts]
+tinca-tag = "tinca_tag.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/AuriLabsTech/tinca-tag"
+Repository = "https://github.com/AuriLabsTech/tinca-tag"
+Issues = "https://github.com/AuriLabsTech/tinca-tag/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tinca_tag"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
