@@ -1,5 +1,7 @@
 # Publishes on a version tag (vX.Y.Z, including pre-releases like v0.1.0.dev0).
-# Uses PyPI Trusted Publishing (OIDC): no API tokens. Requires one-time setup:
+# Routing: pre-release tags (containing "dev" or "rc") publish to TestPyPI only;
+# final tags (vX.Y.Z) publish to TestPyPI and then PyPI.
+# Uses PyPI Trusted Publishing (OIDC): no API tokens. One-time setup:
 #   - Configure trusted publishers for this repo on TestPyPI and PyPI.
 #   - Create GitHub environments named "testpypi" and "pypi".
 name: Publish
@@ -53,6 +55,7 @@ jobs:
 
   pypi:
     needs: testpypi
+    if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'rc') }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
