@@ -24,7 +24,9 @@ dependencies = ["segno>=1.6"]
 
 [project.optional-dependencies]
 doctor = ["psutil>=5.9"]
-test = ["pytest>=8", "pytest-cov"]
+# zxing-cpp + Pillow decode rendered QRs in the CP-B round-trip; they bundle their
+# native libs (no system package needed), so CI stays a plain pip install.
+test = ["pytest>=8", "pytest-cov", "zxing-cpp>=2", "Pillow>=10"]
 dev = ["tinca-tag[doctor,test]", "ruff>=0.6"]
 
 [project.scripts]
@@ -47,3 +49,9 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# CP-C (tests/integration) launches real ROS bridge containers: slow and Docker-bound, so
+# it is excluded by default. Run it with: pytest -m integration
+addopts = "-m 'not integration'"
+markers = [
+  "integration: CP-C end-to-end against real ROS 2 bridge containers (needs Docker; slow)",
+]
