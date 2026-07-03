@@ -1,0 +1,20 @@
+name: Integration (CP-C)
+
+# CP-C launches real ROS 2 bridge containers, so it is too heavy for every PR. Run it on
+# demand and on a weekly schedule. GitHub's ubuntu runners ship Docker.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -m integration -v
