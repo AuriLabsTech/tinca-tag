@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tinca-tag"
-version = "0.1.0.dev0"
+version = "0.1.0.dev1"
 description = "Scan-to-connect QR codes for ROS 2 robots, for the Tinca app."
 readme = "README.md"
 requires-python = ">=3.9"
