@@ -51,12 +51,8 @@ def parse_proc_net_tcp(text: str, *, ipv6: bool = False) -> list[ListeningSocket
     return out
 
 
-def listening_ports(*, include_loopback: bool = False) -> list[int]:
-    """Return distinct listening TCP ports on this host, best LAN-reachable first.
-
-    Empty on hosts without ``/proc`` (non-Linux). Loopback-only ports are excluded by
-    default because a phone cannot reach them (ADR 0007).
-    """
+def _all_listening() -> list[ListeningSocket]:
+    """Every listening socket from ``/proc`` (empty on non-Linux)."""
     sockets: list[ListeningSocket] = []
     for path, is_v6 in (("/proc/net/tcp", False), ("/proc/net/tcp6", True)):
         try:
@@ -64,11 +60,40 @@ def listening_ports(*, include_loopback: bool = False) -> list[int]:
         except OSError:
             continue
         sockets.extend(parse_proc_net_tcp(text, ipv6=is_v6))
+    return sockets
 
+
+def listening_ports(*, include_loopback: bool = False) -> list[int]:
+    """Return distinct listening TCP ports on this host, best LAN-reachable first.
+
+    Empty on hosts without ``/proc`` (non-Linux). Loopback-only ports are excluded by
+    default because a phone cannot reach them (ADR 0007).
+    """
     ports: list[int] = []
-    for sock in sockets:
+    for sock in _all_listening():
         if sock.loopback_only and not include_loopback:
             continue
         if sock.port not in ports:
             ports.append(sock.port)
     return ports
+
+
+def proc_available() -> bool:
+    """Can we enumerate listening sockets here? (False on non-Linux, no ``/proc``.)"""
+    return Path("/proc/net/tcp").exists()
+
+
+def bind_status(port: int) -> str:
+    """How ``port`` is bound on this host, for the doctor's reachability tree (ADR 0009).
+
+    ``"exposed"`` (bound to a routable address, e.g. ``0.0.0.0``, so the LAN can reach it),
+    ``"loopback"`` (bound to ``127.0.0.1``/``::1`` only, so a phone cannot), or ``"absent"``
+    (nothing listening on this port here -- e.g. an unpublished container port seen from
+    the host). ``"absent"`` on any host without ``/proc``.
+    """
+    on_port = [sock for sock in _all_listening() if sock.port == port]
+    if not on_port:
+        return "absent"
+    if any(not sock.loopback_only for sock in on_port):
+        return "exposed"
+    return "loopback"

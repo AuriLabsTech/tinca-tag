@@ -100,6 +100,61 @@ def test_unreachable_warning_still_emits(monkeypatch, capsys):
     assert "did not answer" in err
 
 
+def test_doctor_healthy_reports_ok_and_exits_0(monkeypatch, capsys):
+    _patch_detect(monkeypatch, _ok_detection())
+    assert cli.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "tinca-tag doctor" in out
+    assert "[ok]" in out
+    assert "Ready." in out
+
+
+def test_doctor_unreachable_reports_fail_and_exits_1(monkeypatch, capsys):
+    # bridge found but the LAN probe failed; on-host, exposed bind -> firewall
+    det = _ok_detection(reachable=False)
+    _patch_detect(monkeypatch, det)
+    monkeypatch.setattr(cli, "diagnose", _real_diagnose_with(bind="exposed"))
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "[fail]" in out
+    assert "ufw allow 8765" in out
+    assert "Not ready." in out
+
+
+def test_doctor_no_bridge_guides_and_exits_1(monkeypatch, capsys):
+    det = Detection(
+        endpoint=None,
+        source="none",
+        lan_ip="192.168.1.50",
+        reachable=None,
+        in_container=False,
+        notes=[],
+    )
+    _patch_detect(monkeypatch, det)
+    monkeypatch.setattr(
+        cli, "diagnose", _real_diagnose_with(ros_distro="humble", installed=["foxglove_bridge"])
+    )
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "ros2 launch foxglove_bridge" in out
+    assert "Not ready." in out
+
+
+def _real_diagnose_with(*, bind="exposed", ros_distro=None, installed=None):
+    """Wrap the real diagnose() with injected fact-gatherers for CLI-level tests."""
+    from tinca_tag.diagnose import diagnose as _diagnose
+
+    def _wrapped(detection, **kwargs):
+        kwargs.setdefault("bind_status_fn", lambda port: bind)
+        kwargs.setdefault("proc_available_fn", lambda: True)
+        kwargs.setdefault("listening_count_fn", lambda: 1)
+        kwargs.setdefault("ros_distro_fn", lambda: ros_distro)
+        kwargs.setdefault("bridge_installed_fn", lambda distro: list(installed or []))
+        return _diagnose(detection, **kwargs)
+
+    return _wrapped
+
+
 def test_bare_invocation_prints_help(capsys):
     assert cli.main([]) == 0
     assert "usage" in capsys.readouterr().out.lower()
