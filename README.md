@@ -4,7 +4,7 @@ Scan-to-connect QR codes for ROS 2 robots.
 
 `tinca-tag` runs on your robot, detects the ROS 2 bridge you already have running (rosbridge or foxglove_bridge), and prints a QR code. Scan it with your phone's camera and Tinca opens with the host, port, and protocol already filled in, so you just tap Connect. No reading off an IP, switching apps, and typing `host:port` by hand. Because the QR is built from the robot's live network address, it keeps working across reboots and DHCP changes.
 
-> Status: early work in progress (pre-alpha). The commands and behavior below are the target for the first release and are not all implemented yet. See [ROADMAP.md](ROADMAP.md).
+> Status: pre-alpha. `qr` and `doctor` both work, but options and output may still change before 0.1.0. See [ROADMAP.md](ROADMAP.md).
 
 ## Why
 
@@ -27,7 +27,9 @@ tinca-tag qr        # detect the bridge and print a QR to connect
 tinca-tag doctor    # check the setup and report what, if anything, is wrong
 ```
 
-Planned options include `--host`, `--port`, `--protocol`, `--secure` / `--no-secure`, `--png`, and `--svg`.
+Both commands detect everything by default. To override what they find, use `--host`, `--port`, `--protocol`, `--secure` / `--no-secure`, or `--mdns` (emit `<hostname>.local` as the host). `qr` can also write a file with `--png` or `--svg` (and `--out <path>`), and label the robot with `--name`.
+
+`doctor` only reads and advises. When something is wrong, it prints the commands to fix it; it never runs them for you. Run `tinca-tag <command> --help` for the full list.
 
 ## What the QR contains
 
@@ -43,4 +45,4 @@ You scan the QR with your phone's camera or any QR reader. Because it is a deep 
 
 Apache-2.0. Copyright 2026 Auri Labs.
 
-"Tinca" is a trademark of Auri Labs. The code in this repository is open source; the name and brand are not.
+The license covers the code. It does not grant any right to use the Tinca name or logo (see section 6 of the license).
