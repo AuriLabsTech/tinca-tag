@@ -28,6 +28,12 @@ _LAUNCH = {
     "foxglove_bridge": ("foxglove_bridge", "foxglove_bridge_launch.xml", 8765),
     "rosbridge_server": ("rosbridge_server", "rosbridge_websocket_launch.xml", 9090),
 }
+# package -> launch args appended to every printed launch command. rosbridge 2.0.8
+# (Humble) defaults both to false, so a cancel or service call waits behind a running
+# action goal (measured by ros-mobile-bridge, 2026-10-14); later distros default to true.
+_EXTRA_ARGS = {
+    "rosbridge_server": "send_action_goals_in_new_thread:=true call_services_in_new_thread:=true",
+}
 
 
 @dataclass(frozen=True)
@@ -57,16 +63,19 @@ class Diagnosis:
         return 0 if self.healthy else 1
 
 
-def _launch_cmd(package: str, port: int | None = None) -> str:
+def _launch_cmd(package: str, port: int | None = None, address: str | None = None) -> str:
     name, launch_file, default_port = _LAUNCH[package]
-    return f"ros2 launch {name} {launch_file} port:={port if port is not None else default_port}"
+    args = [f"address:={address}"] if address else []
+    args.append(f"port:={port if port is not None else default_port}")
+    if package in _EXTRA_ARGS:
+        args.append(_EXTRA_ARGS[package])
+    return f"ros2 launch {name} {launch_file} " + " ".join(args)
 
 
 def _bind_fix(protocol: str, port: int) -> tuple[str, ...]:
-    name, launch_file, _ = _LAUNCH[_PROTOCOL_PACKAGE[protocol]]
     return (
         "The bridge is bound to loopback (127.0.0.1) only. Relaunch it on all interfaces:",
-        f"  ros2 launch {name} {launch_file} address:=0.0.0.0 port:={port}",
+        "  " + _launch_cmd(_PROTOCOL_PACKAGE[protocol], port, address="0.0.0.0"),
     )
 
 
