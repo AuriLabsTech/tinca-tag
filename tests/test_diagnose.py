@@ -119,9 +119,35 @@ def test_no_bridge_installed_not_running_prints_foxglove_launch():
 def test_no_bridge_installed_rosbridge_prints_its_launch():
     diag = _diagnose(_none(), bridge_installed_fn=lambda distro: ["rosbridge_server"])
     bridge = _check(diag, "bridge")
-    assert "ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090" in _remediation(
-        bridge
-    )
+    assert (
+        "ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090"
+        " send_action_goals_in_new_thread:=true call_services_in_new_thread:=true"
+    ) in _remediation(bridge)
+
+
+# rosbridge on Humble (2.0.8) defaults both to false, so a cancel waits behind the
+# running goal (measured by ros-mobile-bridge, 2026-10-14). Every printed rosbridge
+# launch carries both; newer distros already default them to true.
+_THREADED = "send_action_goals_in_new_thread:=true call_services_in_new_thread:=true"
+
+
+def test_no_bridge_not_installed_rosbridge_alternative_is_threaded():
+    diag = _diagnose(_none(), bridge_installed_fn=lambda distro: [])
+    rem = _remediation(_check(diag, "bridge"))
+    rosbridge_lines = [line for line in rem.splitlines() if "ros2 launch rosbridge_server" in line]
+    assert rosbridge_lines and all(_THREADED in line for line in rosbridge_lines)
+
+
+def test_loopback_bind_fix_for_rosbridge_is_threaded():
+    diag = _diagnose(_found(ROS, reachable=False), bind_status_fn=lambda port: "loopback")
+    rem = _remediation(_check(diag, "reachable"))
+    assert "address:=0.0.0.0 port:=9090" in rem
+    assert _THREADED in rem
+
+
+def test_foxglove_launch_has_no_rosbridge_args():
+    diag = _diagnose(_found(reachable=False), bind_status_fn=lambda port: "loopback")
+    assert "new_thread" not in _remediation(_check(diag, "reachable"))
 
 
 def test_no_bridge_not_installed_recommends_foxglove_apt():
