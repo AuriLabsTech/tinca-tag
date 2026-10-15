@@ -110,9 +110,9 @@ def test_no_bridge_installed_not_running_prints_foxglove_launch():
     bridge = _check(diag, "bridge")
     assert bridge.status == "fail"
     assert "not running" in bridge.detail.lower()
-    assert "ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765" in _remediation(
-        bridge
-    )
+    assert (
+        "ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765 include_hidden:=true"
+    ) in _remediation(bridge)
     assert diag.exit_code == 1
 
 
@@ -148,6 +148,21 @@ def test_loopback_bind_fix_for_rosbridge_is_threaded():
 def test_foxglove_launch_has_no_rosbridge_args():
     diag = _diagnose(_found(reachable=False), bind_status_fn=lambda port: "loopback")
     assert "new_thread" not in _remediation(_check(diag, "reachable"))
+
+
+# foxglove_bridge hides every action endpoint (`_action/...`) unless include_hidden
+# is true, so a stock launch has no goal, cancel or status (Tinca lab, 2026-10-11).
+def test_loopback_bind_fix_for_foxglove_includes_hidden():
+    diag = _diagnose(_found(reachable=False), bind_status_fn=lambda port: "loopback")
+    rem = _remediation(_check(diag, "reachable"))
+    assert "address:=0.0.0.0 port:=8765 include_hidden:=true" in rem
+
+
+def test_no_bridge_not_installed_foxglove_launch_includes_hidden():
+    diag = _diagnose(_none(), bridge_installed_fn=lambda distro: [])
+    rem = _remediation(_check(diag, "bridge"))
+    foxglove_lines = [line for line in rem.splitlines() if "ros2 launch foxglove_bridge" in line]
+    assert foxglove_lines and all("include_hidden:=true" in line for line in foxglove_lines)
 
 
 def test_no_bridge_not_installed_recommends_foxglove_apt():

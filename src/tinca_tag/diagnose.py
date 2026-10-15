@@ -28,10 +28,13 @@ _LAUNCH = {
     "foxglove_bridge": ("foxglove_bridge", "foxglove_bridge_launch.xml", 8765),
     "rosbridge_server": ("rosbridge_server", "rosbridge_websocket_launch.xml", 9090),
 }
-# package -> launch args appended to every printed launch command. rosbridge 2.0.8
-# (Humble) defaults both to false, so a cancel or service call waits behind a running
-# action goal (measured by ros-mobile-bridge, 2026-10-14); later distros default to true.
+# package -> launch args appended to every printed launch command, so actions work.
+# foxglove_bridge advertises no action endpoint (`_action/...`) unless include_hidden is
+# true (measured by the Tinca lab, 2026-10-11). rosbridge 2.0.8 (Humble) defaults both
+# thread args to false, so a cancel or service call waits behind a running action goal
+# (measured by ros-mobile-bridge, 2026-10-14); later distros default to true.
 _EXTRA_ARGS = {
+    "foxglove_bridge": "include_hidden:=true",
     "rosbridge_server": "send_action_goals_in_new_thread:=true call_services_in_new_thread:=true",
 }
 
