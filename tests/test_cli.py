@@ -155,6 +155,52 @@ def _real_diagnose_with(*, bind="exposed", ros_distro=None, installed=None):
     return _wrapped
 
 
+def _several_bridges():
+    from tinca_tag.detect import FoundBridge
+
+    return Detection(
+        endpoint=None,
+        source="probe",
+        lan_ip="192.168.1.50",
+        reachable=None,
+        in_container=False,
+        notes=[],
+        bridges=[FoundBridge(9090, "rosbridge", False), FoundBridge(8766, "foxglove-ws", False)],
+    )
+
+
+def test_qr_with_several_bridges_lists_them_and_draws_no_qr(monkeypatch, capsys):
+    _patch_detect(monkeypatch, _several_bridges())
+    assert cli.main(["qr"]) == 1
+    out = capsys.readouterr()
+    assert "█" not in out.out  # no QR: it might point at the wrong bridge
+    assert "• foxglove-ws on port 8766" in out.err
+    assert "tinca-tag qr --port 8766" in out.err
+
+
+def test_qr_choices_keep_the_flags_the_user_typed(monkeypatch, capsys):
+    _patch_detect(monkeypatch, _several_bridges())
+    assert cli.main(["qr", "--host", "192.168.1.80", "--name", "my arm", "--png"]) == 1
+    err = capsys.readouterr().err
+    assert "tinca-tag qr --host 192.168.1.80 --name 'my arm' --png --port 8766" in err
+
+
+def test_doctor_with_several_bridges_lists_them(monkeypatch, capsys):
+    _patch_detect(monkeypatch, _several_bridges())
+    monkeypatch.setattr(cli, "diagnose", _real_diagnose_with(bind="exposed"))
+    assert cli.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "• rosbridge on port 9090" in out
+    assert "tinca-tag doctor --port 9090" in out
+
+
+def test_doctor_choices_keep_the_flags_the_user_typed(monkeypatch, capsys):
+    _patch_detect(monkeypatch, _several_bridges())
+    monkeypatch.setattr(cli, "diagnose", _real_diagnose_with(bind="exposed"))
+    assert cli.main(["doctor", "--timeout", "2"]) == 1
+    assert "tinca-tag doctor --timeout 2 --port 9090" in capsys.readouterr().out
+
+
 def test_bare_invocation_prints_help(capsys):
     assert cli.main([]) == 0
     assert "usage" in capsys.readouterr().out.lower()

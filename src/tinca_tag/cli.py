@@ -9,11 +9,12 @@ sockets touched are the robot's own bridge on the LAN.
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
 from . import __version__
-from .detect import Detection, detect
+from .detect import Detection, bridge_choices, detect
 from .diagnose import Diagnosis, diagnose
 from .render import InvalidHost, connect_url, save, terminal_str, validate_host
 
@@ -131,6 +132,8 @@ def cmd_qr(args: argparse.Namespace) -> int:
     )
 
     if not det.ok:
+        if len(det.bridges) > 1:
+            print("\n".join(bridge_choices(det.bridges, args.rerun)), file=sys.stderr)
         for note in det.notes:
             print(note, file=sys.stderr)
         return 1
@@ -186,7 +189,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         mdns=args.mdns,
         timeout=args.timeout,
     )
-    diag = diagnose(det, host=args.host, port=args.port)
+    diag = diagnose(det, host=args.host, port=args.port, rerun=args.rerun)
     print(_doctor_report(diag))
     return diag.exit_code
 
@@ -194,7 +197,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the ``tinca-tag`` command."""
     parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(argv)
+    # The command as typed, so a "pick one" list can suggest it back with --port added.
+    args.rerun = "tinca-tag " + shlex.join(argv)
     if not getattr(args, "command", None):
         parser.print_help()
         return 0
