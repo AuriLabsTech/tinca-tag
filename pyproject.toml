@@ -26,7 +26,15 @@ dependencies = ["segno>=1.6"]
 doctor = ["psutil>=5.9"]
 # zxing-cpp + Pillow decode rendered QRs in the CP-B round-trip; they bundle their
 # native libs (no system package needed), so CI stays a plain pip install.
-test = ["pytest>=8", "pytest-cov", "zxing-cpp>=2", "Pillow>=10"]
+# zxing-cpp 3.2.0 (2026-11-24) ships wheels for Python 3.12+ only; older Pythons would
+# build it from source and fail, so they stay on 3.1.x.
+test = [
+    "pytest>=8",
+    "pytest-cov",
+    "zxing-cpp>=2,<3.2; python_version < '3.12'",
+    "zxing-cpp>=2; python_version >= '3.12'",
+    "Pillow>=10",
+]
 dev = ["tinca-tag[doctor,test]", "ruff>=0.6"]
 
 [project.scripts]
