@@ -248,6 +248,21 @@ def test_hint_surfaces_scan_cap_truncation():
 # --- exit-code semantics ----------------------------------------------------------
 
 
+def test_several_bridges_fail_the_bridge_check_with_choices():
+    from tinca_tag.detect import FoundBridge
+
+    det = _none()
+    det.bridges = [FoundBridge(9090, "rosbridge", False), FoundBridge(8766, "foxglove-ws", False)]
+    diag = _diagnose(det)
+    bridge = next(c for c in diag.checks if c.name == "bridge")
+    assert bridge.status == "fail"
+    assert "2 bridges" in bridge.detail
+    text = "\n".join(bridge.remediation)
+    assert "tinca-tag doctor --port 8766" in text
+    assert "install" not in text.lower()  # not the no-bridge advice
+    assert diag.exit_code == 1
+
+
 def test_exit_code_is_one_iff_any_fail():
     assert _diagnose(_found()).exit_code == 0
     assert _diagnose(_found(reachable=None, in_container=True)).exit_code == 0  # warn only

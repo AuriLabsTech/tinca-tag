@@ -195,6 +195,76 @@ def _endpoint(host, port, protocol, secure):
     return Endpoint(host=host, port=port, protocol=protocol, secure=secure)
 
 
+# --- several bridges on one host: never guess which one the user meant ------------
+
+
+def test_several_bridges_emit_nothing_and_list_them():
+    det = _detect(
+        {
+            ("127.0.0.1", 9090): ROS,
+            ("127.0.0.1", 8765): FOX,
+            ("127.0.0.1", 8766): FOX,
+        },
+        listening=[8766],
+    )
+    assert not det.ok
+    assert det.endpoint is None
+    assert [(b.port, b.protocol) for b in det.bridges] == [
+        (9090, "rosbridge"),
+        (8765, "foxglove-ws"),
+        (8766, "foxglove-ws"),
+    ]
+
+
+def test_one_bridge_among_scanned_ports_is_still_picked():
+    det = _detect({("127.0.0.1", 8766): FOX, ("192.168.1.50", 8766): FOX}, listening=[5000, 8766])
+    assert det.ok
+    assert det.endpoint.port == 8766
+    assert [b.port for b in det.bridges] == [8766]
+
+
+def test_protocol_flag_narrows_several_bridges_to_one():
+    det = _detect(
+        {("127.0.0.1", 9090): ROS, ("127.0.0.1", 8766): FOX, ("192.168.1.50", 8766): FOX},
+        listening=[8766],
+        protocol="foxglove-ws",
+    )
+    assert det.ok
+    assert det.endpoint.port == 8766
+
+
+def test_explicit_port_skips_the_other_bridges():
+    probe = FakeProbe({("127.0.0.1", 9090): ROS, ("127.0.0.1", 8766): FOX})
+    det = detect(
+        port=8766,
+        probe_fn=probe,
+        lan_ip_fn=lambda: "192.168.1.50",
+        mdns_fn=lambda: "robot.local",
+        ports_fn=lambda: [8766],
+        in_container_fn=lambda: False,
+    )
+    assert det.ok
+    assert det.endpoint.port == 8766
+    assert ("127.0.0.1", 9090) not in probe.calls
+
+
+def test_bridge_choices_are_bullets_with_a_command_each():
+    from tinca_tag.detect import FoundBridge, bridge_choices
+
+    lines = bridge_choices(
+        [FoundBridge(9090, "rosbridge", False), FoundBridge(8766, "foxglove-ws", True)],
+        "tinca-tag qr",
+    )
+    text = "\n".join(lines)
+    assert "Found 2 bridges" in lines[0]
+    assert "this host" not in lines[0]  # hits may come from a remote --host
+    assert "• rosbridge on port 9090" in text
+    assert "• foxglove-ws (TLS) on port 8766" in text
+    assert "tinca-tag qr --port 9090" in text
+    assert "tinca-tag qr --port 8766" in text
+    assert chr(0x2014) not in text  # no em dash in CLI copy
+
+
 class TimeoutProbe:
     """Records the timeout each (host, port) probe was given; answers nothing."""
 
@@ -234,11 +304,21 @@ def test_explicit_port_keeps_the_full_timeout():
     assert timeouts[("127.0.0.1", 5000)] == 1.0
 
 
-def test_remote_target_keeps_the_full_timeout_on_scanned_ports():
-    # The short timeout assumes a bridge on this host; a robot over Wi-Fi is slower.
+def test_remote_target_is_probed_on_defaults_only():
+    # Ports scanned on this host say nothing about a remote robot; probing them there
+    # at the full timeout cost up to a minute.
     timeouts = _detect_timeouts(listening=[5000], host="192.168.1.80", timeout=1.0)
     assert timeouts[("127.0.0.1", 5000)] < 1.0
-    assert timeouts[("192.168.1.80", 5000)] == 1.0
+    assert ("192.168.1.80", 5000) not in timeouts
+    assert timeouts[("192.168.1.80", 9090)] == 1.0
+
+
+def test_no_note_calls_doctor_a_future_milestone():
+    det = _detect({("127.0.0.1", 8765): FOX}, listening=[])  # LAN probe fails
+    assert det.reachable is False
+    assert not any("(M2)" in note for note in det.notes)
+    none = _detect({}, listening=[])
+    assert not any("(M2)" in note for note in none.notes)
 
 
 def test_short_scan_timeout_never_exceeds_the_requested_one():

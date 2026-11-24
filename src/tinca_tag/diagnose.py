@@ -17,7 +17,7 @@ from typing import Literal
 
 from . import rosenv
 from .detect import _MAX_NONDEFAULT_PORTS as SCAN_CAP
-from .detect import DEFAULT_PORTS, Detection, sockets
+from .detect import DEFAULT_PORTS, Detection, bridge_choices, sockets
 
 Status = Literal["ok", "warn", "fail", "skip"]
 
@@ -244,8 +244,13 @@ def diagnose(
     listening_count_fn=None,
     ros_distro_fn=rosenv.ros_distro,
     bridge_installed_fn=rosenv.installed_bridges,
+    rerun: str = "tinca-tag doctor",
 ) -> Diagnosis:
-    """Diagnose a bridge setup from a :class:`Detection`, per ADR 0009."""
+    """Diagnose a bridge setup from a :class:`Detection`, per ADR 0009.
+
+    ``rerun`` is the command as the user typed it; a "pick one" list suggests it back
+    with ``--port`` added.
+    """
     if listening_count_fn is None:
         listening_count_fn = _default_listening_count
 
@@ -261,6 +266,10 @@ def diagnose(
                     ("Another bridge may be running; pass --port <port> to pick it.",),
                 )
             )
+    elif len(detection.bridges) > 1:
+        _, *choices = bridge_choices(detection.bridges, rerun)
+        detail = f"{len(detection.bridges)} bridges found; not guessing which one you meant"
+        checks = [Check("bridge", "fail", detail, ("Pick one and re-run:", *choices))]
     else:
         checks = [
             _missing_check(

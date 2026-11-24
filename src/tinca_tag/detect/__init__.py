@@ -2,9 +2,11 @@
 
 Produces a validated :class:`~tinca_tag.endpoint.Endpoint` by reading the actual running
 config, in source precedence: explicit flags override; otherwise a WS-handshake probe of
-local listening ports then the default ports (9090/8765) settles port, protocol, and
-secure. The emitted ``host`` is always the LAN-reachable address (never a container IP or
-localhost), validated by probing it the way the phone would (ADR 0007).
+the default ports (9090/8765) and then this host's other listening ports settles port,
+protocol, and secure. Every candidate is probed; if more than one bridge answers, no
+endpoint is chosen and the caller lists them (:func:`bridge_choices`). The emitted
+``host`` is always the LAN-reachable address (never a container IP or localhost),
+validated by probing it the way the phone would (ADR 0007).
 
 The pip CLI lives on these rungs (process/socket enumeration, default-port probe, flags);
 the ros2 ament variant adds the authoritative ROS-param rung on top. I/O is injected so
@@ -24,8 +26,8 @@ LOCAL_HOST = "127.0.0.1"
 _MAX_NONDEFAULT_PORTS = 25  # bound how many listening ports we WS-probe (no silent cap)
 # A port found by scanning is usually not a bridge, and some non-bridge listeners accept
 # the connection and never answer; a bridge on this host answers its handshake in
-# milliseconds. Defaults, an explicit --port, and a remote --host target keep the
-# caller's full timeout.
+# milliseconds. Defaults and an explicit --port keep the caller's full timeout; a remote
+# --host target is probed on those only, never on ports scanned here.
 _SCAN_TIMEOUT = 0.3
 
 
@@ -39,10 +41,31 @@ class Detection:
     reachable: bool | None  # probed <host>:<port> as the phone would; None = not checked
     in_container: bool
     notes: list[str] = field(default_factory=list)
+    # Every bridge the probe found on the target. More than one means no endpoint was
+    # chosen: the user picks with --port (see bridge_choices).
+    bridges: list[FoundBridge] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return self.endpoint is not None
+
+
+@dataclass(frozen=True)
+class FoundBridge:
+    port: int
+    protocol: Protocol
+    secure: bool
+
+
+def bridge_choices(bridges: list[FoundBridge], command: str) -> list[str]:
+    """Bullet list of the bridges found, each with the command that picks it."""
+    labels = [f"• {b.protocol}{' (TLS)' if b.secure else ''} on port {b.port}" for b in bridges]
+    width = max(len(label) for label in labels)
+    lines = [f"Found {len(bridges)} bridges. Pick one and re-run:"]
+    lines.extend(
+        f"  {label.ljust(width)}    {command} --port {b.port}" for label, b in zip(labels, bridges)
+    )
+    return lines
 
 
 def _candidate_ports(port: int | None, listening: list[int]) -> list[int]:
@@ -69,7 +92,7 @@ def _no_detection(lan_ip: str | None, inside: bool, *, scanned: bool = True) -> 
         "  Is rosbridge or foxglove_bridge running on this machine?",
         *port_hint,
         "  Pointing at another machine? Pass --host <ip> --port <port>.",
-        "  Guided diagnosis arrives with `tinca-tag doctor` (M2).",
+        "  For a guided check, run `tinca-tag doctor`.",
     ]
     return Detection(
         endpoint=None,
@@ -112,6 +135,7 @@ def detect(
     # 2. Resolve port / protocol / secure: flags win, else probe.
     known_port, known_proto, known_secure = port, protocol, secure
     source: str
+    found: list[FoundBridge] = []
 
     if known_port is not None and known_proto is not None and known_secure is not None:
         source = "flags"
@@ -126,20 +150,39 @@ def detect(
         if host and host not in targets:
             targets.append(host)  # remote / inside-container target
 
-        hit = None
+        # Probe every candidate, not just until the first answer: with several bridges up
+        # (two containers on one laptop), the first one is not necessarily the one meant.
+        hits: list[tuple[str, int, ws_probe.ProbeResult]] = []
         for target in targets:
-            for candidate in candidate_ports:
+            # Ports scanned here say nothing about a remote robot: probe its defaults only.
+            ports_here = candidate_ports if target == LOCAL_HOST else _candidate_ports(port, [])
+            for candidate in ports_here:
                 scanned = port is None and candidate not in DEFAULT_PORTS and target == LOCAL_HOST
                 probe_timeout = min(timeout, _SCAN_TIMEOUT) if scanned else timeout
                 result = probe_fn(target, candidate, timeout=probe_timeout)
-                if result is not None:
-                    hit = (target, candidate, result)
-                    break
-            if hit:
+                if result is None:
+                    continue
+                # --protocol narrows a scan; with --port it is an override. --secure stays
+                # an override only (TLS proxy in front of a plain bridge).
+                if port is None and protocol is not None and result.protocol != protocol:
+                    continue
+                hits.append((target, candidate, result))
+            if hits:
                 break
 
-        if hit is not None:
-            target, candidate, result = hit
+        found = [FoundBridge(c, r.protocol, r.secure) for _, c, r in hits]
+        if len(hits) > 1:
+            # Never guess: a QR for the wrong bridge is a broken QR (ADR 0003).
+            return Detection(
+                endpoint=None,
+                source="probe",
+                lan_ip=lan_ip,
+                reachable=None,
+                in_container=inside,
+                bridges=found,
+            )
+        if hits:
+            target, candidate, result = hits[0]
             known_port = port if port is not None else candidate
             known_proto = protocol if protocol is not None else result.protocol
             known_secure = secure if secure is not None else result.secure
@@ -195,7 +238,7 @@ def detect(
             notes.append(
                 f"Warning: {emit_host}:{endpoint.port} did not answer from here. "
                 "The phone may not connect (port not published / firewall). "
-                "`tinca-tag doctor` (M2) explains why."
+                "`tinca-tag doctor` explains why."
             )
 
     return Detection(
@@ -205,7 +248,8 @@ def detect(
         reachable=reachable,
         in_container=inside,
         notes=notes,
+        bridges=found,
     )
 
 
-__all__ = ["Detection", "detect", "DEFAULT_PORTS"]
+__all__ = ["Detection", "FoundBridge", "bridge_choices", "detect", "DEFAULT_PORTS"]
