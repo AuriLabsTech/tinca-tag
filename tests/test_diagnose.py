@@ -40,7 +40,7 @@ def _diagnose(detection, **overrides):
         host=None,
         port=None,
         bind_status_fn=lambda port: "exposed",
-        proc_available_fn=lambda: True,
+        enumeration_available_fn=lambda: True,
         listening_count_fn=lambda: 2,
         ros_distro_fn=lambda: "humble",
         bridge_installed_fn=lambda distro: ["foxglove_bridge"],
@@ -207,9 +207,13 @@ def test_hint_suggests_port_for_remote_target():
     assert any("--port" in "\n".join(c.remediation) for c in diag.checks)
 
 
-def test_hint_suggests_port_on_non_linux():
-    diag = _diagnose(_none(), proc_available_fn=lambda: False)
-    assert any("--port" in "\n".join(c.remediation) for c in diag.checks)
+def test_hint_suggests_port_when_ports_cannot_be_enumerated():
+    diag = _diagnose(_none(), enumeration_available_fn=lambda: False)
+    text = "\n".join("\n".join(c.remediation) for c in diag.checks)
+    assert "--port" in text
+    # A failed scan on a supported OS (netstat timing out on macOS) is not the OS's
+    # fault; the hint must not say it is.
+    assert "this OS" not in text
 
 
 def test_hint_surfaces_scan_cap_truncation():

@@ -146,7 +146,7 @@ def _real_diagnose_with(*, bind="exposed", ros_distro=None, installed=None):
 
     def _wrapped(detection, **kwargs):
         kwargs.setdefault("bind_status_fn", lambda port: bind)
-        kwargs.setdefault("proc_available_fn", lambda: True)
+        kwargs.setdefault("enumeration_available_fn", lambda: True)
         kwargs.setdefault("listening_count_fn", lambda: 1)
         kwargs.setdefault("ros_distro_fn", lambda: ros_distro)
         kwargs.setdefault("bridge_installed_fn", lambda distro: list(installed or []))

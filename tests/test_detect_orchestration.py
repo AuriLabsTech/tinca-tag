@@ -140,3 +140,54 @@ def _endpoint(host, port, protocol, secure):
     from tinca_tag.endpoint import Endpoint
 
     return Endpoint(host=host, port=port, protocol=protocol, secure=secure)
+
+
+class TimeoutProbe:
+    """Records the timeout each (host, port) probe was given; answers nothing."""
+
+    def __init__(self):
+        self.timeouts = {}
+
+    def __call__(self, host, port, timeout=1.0):
+        self.timeouts[(host, port)] = timeout
+        return None
+
+
+def _detect_timeouts(*, listening, **kwargs):
+    probe = TimeoutProbe()
+    detect(
+        probe_fn=probe,
+        lan_ip_fn=lambda: "192.168.1.50",
+        mdns_fn=lambda: "robot.local",
+        ports_fn=lambda: list(listening),
+        in_container_fn=lambda: False,
+        **kwargs,
+    )
+    return probe.timeouts
+
+
+def test_scanned_ports_get_a_short_probe_timeout():
+    # A desktop host lists many non-bridge listeners (AirPlay, DNS, dev servers); some
+    # accept the connection and never answer, so a full timeout each adds seconds.
+    timeouts = _detect_timeouts(listening=[5000, 8766], timeout=1.0)
+    assert timeouts[("127.0.0.1", 9090)] == 1.0
+    assert timeouts[("127.0.0.1", 8765)] == 1.0
+    assert timeouts[("127.0.0.1", 5000)] < 1.0
+    assert timeouts[("127.0.0.1", 8766)] < 1.0
+
+
+def test_explicit_port_keeps_the_full_timeout():
+    timeouts = _detect_timeouts(listening=[5000], port=5000, timeout=1.0)
+    assert timeouts[("127.0.0.1", 5000)] == 1.0
+
+
+def test_remote_target_keeps_the_full_timeout_on_scanned_ports():
+    # The short timeout assumes a bridge on this host; a robot over Wi-Fi is slower.
+    timeouts = _detect_timeouts(listening=[5000], host="192.168.1.80", timeout=1.0)
+    assert timeouts[("127.0.0.1", 5000)] < 1.0
+    assert timeouts[("192.168.1.80", 5000)] == 1.0
+
+
+def test_short_scan_timeout_never_exceeds_the_requested_one():
+    timeouts = _detect_timeouts(listening=[5000], timeout=0.05)
+    assert timeouts[("127.0.0.1", 5000)] <= 0.05

@@ -165,7 +165,7 @@ def _found_checks(detection, bind_status_fn) -> list[Check]:
     return checks
 
 
-def _scan_hint(host, port, proc_available_fn, listening_count_fn) -> str | None:
+def _scan_hint(host, port, enumeration_available_fn, listening_count_fn) -> str | None:
     """Only surface --port when we genuinely could not auto-scan (ADR 0009 / Q6)."""
     if port is not None:
         return None
@@ -174,9 +174,9 @@ def _scan_hint(host, port, proc_available_fn, listening_count_fn) -> str | None:
             "Note: can't scan a remote host's ports from here. If its bridge uses a "
             "nonstandard port, pass --port <port> --protocol rosbridge|foxglove-ws."
         )
-    if not proc_available_fn():
+    if not enumeration_available_fn():
         return (
-            "Note: couldn't enumerate ports on this OS; only 9090 and 8765 were probed. "
+            "Note: couldn't list this host's listening ports; only 9090 and 8765 were probed. "
             "Pass --port <port> for a nonstandard bridge."
         )
     if listening_count_fn() > SCAN_CAP:
@@ -188,7 +188,7 @@ def _scan_hint(host, port, proc_available_fn, listening_count_fn) -> str | None:
 
 
 def _missing_check(
-    host, port, proc_available_fn, listening_count_fn, ros_distro_fn, bridge_installed_fn
+    host, port, enumeration_available_fn, listening_count_fn, ros_distro_fn, bridge_installed_fn
 ) -> Check:
     distro = ros_distro_fn()
     installed = bridge_installed_fn(distro) if distro else []
@@ -228,7 +228,7 @@ def _missing_check(
         "is invisible from here."
     )
 
-    hint = _scan_hint(host, port, proc_available_fn, listening_count_fn)
+    hint = _scan_hint(host, port, enumeration_available_fn, listening_count_fn)
     if hint:
         remediation.append(hint)
     return Check("bridge", "fail", detail, tuple(remediation))
@@ -240,7 +240,7 @@ def diagnose(
     host: str | None = None,
     port: int | None = None,
     bind_status_fn=sockets.bind_status,
-    proc_available_fn=sockets.proc_available,
+    enumeration_available_fn=sockets.enumeration_available,
     listening_count_fn=None,
     ros_distro_fn=rosenv.ros_distro,
     bridge_installed_fn=rosenv.installed_bridges,
@@ -256,7 +256,7 @@ def diagnose(
             _missing_check(
                 host,
                 port,
-                proc_available_fn,
+                enumeration_available_fn,
                 listening_count_fn,
                 ros_distro_fn,
                 bridge_installed_fn,
