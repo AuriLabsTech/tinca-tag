@@ -22,6 +22,11 @@ from . import ws as ws_probe
 DEFAULT_PORTS = (9090, 8765)  # rosbridge, foxglove
 LOCAL_HOST = "127.0.0.1"
 _MAX_NONDEFAULT_PORTS = 25  # bound how many listening ports we WS-probe (no silent cap)
+# A port found by scanning is usually not a bridge, and some non-bridge listeners accept
+# the connection and never answer; a bridge on this host answers its handshake in
+# milliseconds. Defaults, an explicit --port, and a remote --host target keep the
+# caller's full timeout.
+_SCAN_TIMEOUT = 0.3
 
 
 @dataclass
@@ -110,7 +115,9 @@ def detect(
         hit = None
         for target in targets:
             for candidate in candidate_ports:
-                result = probe_fn(target, candidate, timeout=timeout)
+                scanned = port is None and candidate not in DEFAULT_PORTS and target == LOCAL_HOST
+                probe_timeout = min(timeout, _SCAN_TIMEOUT) if scanned else timeout
+                result = probe_fn(target, candidate, timeout=probe_timeout)
                 if result is not None:
                     hit = (target, candidate, result)
                     break
