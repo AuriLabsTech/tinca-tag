@@ -251,6 +251,16 @@ def diagnose(
 
     if detection.ok:
         checks = _found_checks(detection, bind_status_fn)
+        if port is None and host is None and not enumeration_available_fn():
+            # The found bridge works, but a failed scan may hide a second one (ADR 0012).
+            checks.append(
+                Check(
+                    "scan",
+                    "warn",
+                    "could not list this machine's listening ports; only 9090 and 8765 were tried",
+                    ("Another bridge may be running; pass --port <port> to pick it.",),
+                )
+            )
     else:
         checks = [
             _missing_check(

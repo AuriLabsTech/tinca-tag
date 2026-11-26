@@ -23,6 +23,7 @@ class FakeProbe:
 
 
 def _detect(mapping, *, lan_ip="192.168.1.50", listening=None, inside=False, **kwargs):
+    kwargs.setdefault("scan_available_fn", lambda: True)
     return detect(
         probe_fn=FakeProbe(mapping),
         lan_ip_fn=lambda: lan_ip,
@@ -93,6 +94,58 @@ def test_no_bridge_anywhere_returns_guidance():
     assert not det.ok
     assert det.source == "none"
     assert any("No ROS 2 bridge detected" in n for n in det.notes)
+
+
+def test_no_bridge_says_when_ports_could_not_be_listed():
+    """Seen on macOS 27.2.1: netstat gave nothing, and qr claimed no bridge existed."""
+    det = _detect({}, scan_available_fn=lambda: False)
+    assert not det.ok
+    text = "\n".join(det.notes)
+    assert "Could not list this machine's listening ports" in text
+    assert "only 9090 and 8765 were tried" in text
+    assert "--port <port>" in text
+
+
+def _scan_warned(det):
+    return any("ould not list this machine's listening ports" in n for n in det.notes)
+
+
+def test_no_bridge_with_a_working_scan_has_no_scan_warning():
+    assert not _scan_warned(_detect({}))
+
+
+def test_no_bridge_with_explicit_port_has_no_scan_warning():
+    assert not _scan_warned(_detect({}, port=7000, scan_available_fn=lambda: False))
+
+
+def test_found_default_bridge_still_warns_when_ports_could_not_be_listed():
+    """Seen live 11-26: a tinca-lab bridge on 9090 was emitted, the one on 8766 unseen."""
+    det = _detect(
+        {("127.0.0.1", 9090): ROS, ("192.168.1.50", 9090): ROS},
+        scan_available_fn=lambda: False,
+    )
+    assert det.ok
+    assert det.endpoint.port == 9090
+    assert _scan_warned(det)
+    text = "\n".join(det.notes)
+    assert "Another bridge may be running" in text
+    assert "--port <port>" in text
+
+
+def test_found_bridge_with_a_working_scan_has_no_scan_warning():
+    det = _detect({("127.0.0.1", 9090): ROS, ("192.168.1.50", 9090): ROS})
+    assert det.ok
+    assert not _scan_warned(det)
+
+
+def test_found_bridge_on_explicit_host_has_no_scan_warning():
+    det = _detect(
+        {("10.0.0.9", 9090): ROS},
+        host="10.0.0.9",
+        scan_available_fn=lambda: False,
+    )
+    assert det.ok
+    assert not _scan_warned(det)
 
 
 def test_no_lan_ip_without_host_fails_with_hint():

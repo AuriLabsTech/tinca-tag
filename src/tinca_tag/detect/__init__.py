@@ -54,11 +54,20 @@ def _candidate_ports(port: int | None, listening: list[int]) -> list[int]:
     return ordered + extra
 
 
-def _no_detection(lan_ip: str | None, inside: bool) -> Detection:
+def _no_detection(lan_ip: str | None, inside: bool, *, scanned: bool = True) -> Detection:
+    if scanned:
+        port_hint = [
+            "  On a nonstandard port? Pass --port <port> --protocol rosbridge|foxglove-ws."
+        ]
+    else:
+        port_hint = [
+            "  Could not list this machine's listening ports, so only 9090 and 8765 were tried.",
+            "  On another port? Pass --port <port> --protocol rosbridge|foxglove-ws.",
+        ]
     notes = [
         "No ROS 2 bridge detected.",
         "  Is rosbridge or foxglove_bridge running on this machine?",
-        "  On a nonstandard port? Pass --port <port> --protocol rosbridge|foxglove-ws.",
+        *port_hint,
         "  Pointing at another machine? Pass --host <ip> --port <port>.",
         "  Guided diagnosis arrives with `tinca-tag doctor` (M2).",
     ]
@@ -85,6 +94,7 @@ def detect(
     mdns_fn=lan.mdns_host,
     ports_fn=sockets.listening_ports,
     in_container_fn=container.in_container,
+    scan_available_fn=sockets.enumeration_available,
 ) -> Detection:
     """Resolve a LAN-reachable :class:`Endpoint`, reading reality per ADR 0003/0007."""
     notes: list[str] = []
@@ -106,6 +116,10 @@ def detect(
     if known_port is not None and known_proto is not None and known_secure is not None:
         source = "flags"
     else:
+        # Without --port this host's ports are scanned. The "could not list ports"
+        # warning (ADR 0012) is given only when neither --port nor --host was passed:
+        # with --host the user already pointed at a machine.
+        local_scan_due = port is None and not host
         listening = ports_fn() if port is None else []
         candidate_ports = _candidate_ports(port, listening)
         targets = [LOCAL_HOST]
@@ -130,6 +144,15 @@ def detect(
             known_proto = protocol if protocol is not None else result.protocol
             known_secure = secure if secure is not None else result.secure
             source = f"probe ({target}:{candidate})"
+            if local_scan_due and not scan_available_fn():
+                # A default-port hit can hide a second bridge the failed scan missed.
+                notes.extend(
+                    [
+                        "Note: could not list this machine's listening ports, so only "
+                        "9090 and 8765 were tried.",
+                        "  Another bridge may be running; pass --port <port> to pick it.",
+                    ]
+                )
         elif known_port is not None and known_proto is not None:
             # Enough was specified to emit; we just could not confirm secure -> default 0.
             known_secure = secure if secure is not None else False
@@ -139,7 +162,8 @@ def detect(
                 "(pass --secure to override)."
             )
         else:
-            return _no_detection(lan_ip, inside)
+            scanned = not local_scan_due or scan_available_fn()
+            return _no_detection(lan_ip, inside, scanned=scanned)
 
     # 3. We need a LAN-reachable host to emit.
     if not emit_host:

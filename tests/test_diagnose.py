@@ -211,9 +211,31 @@ def test_hint_suggests_port_when_ports_cannot_be_enumerated():
     diag = _diagnose(_none(), enumeration_available_fn=lambda: False)
     text = "\n".join("\n".join(c.remediation) for c in diag.checks)
     assert "--port" in text
-    # A failed scan on a supported OS (netstat timing out on macOS) is not the OS's
+    # A failed scan on a supported OS (nettop timing out on macOS) is not the OS's
     # fault; the hint must not say it is.
     assert "this OS" not in text
+
+
+def test_found_bridge_warns_when_ports_cannot_be_enumerated():
+    # Seen live 11-26 (ADR 0012): a default-port bridge was found while the scan that
+    # would have shown a second one could not run. Still exit 0: the found bridge works.
+    diag = _diagnose(_found(ROS), enumeration_available_fn=lambda: False)
+    scan = _check(diag, "scan")
+    assert scan.status == "warn"
+    assert "only 9090 and 8765 were tried" in scan.detail
+    assert "--port <port>" in _remediation(scan)
+    assert diag.exit_code == 0
+
+
+def test_found_bridge_has_no_scan_check_when_ports_were_listed():
+    diag = _diagnose(_found(ROS))
+    assert "scan" not in [c.name for c in diag.checks]
+
+
+def test_found_bridge_has_no_scan_check_for_explicit_port_or_host():
+    for overrides in ({"port": 9090}, {"host": "10.0.0.9"}):
+        diag = _diagnose(_found(ROS), enumeration_available_fn=lambda: False, **overrides)
+        assert "scan" not in [c.name for c in diag.checks]
 
 
 def test_hint_surfaces_scan_cap_truncation():
