@@ -1,10 +1,11 @@
 """Listening-socket enumeration (ADR 0003, rung 2).
 
 Stdlib only. Linux reads ``/proc/net/tcp{,6}``; macOS, which has no ``/proc``, parses
-``netstat -an -p tcp`` (read-only, no root needed; psutil needs root there). This finds
-candidate ports for nonstandard bridge setups; the WS handshake in ``ws.py`` then
-confirms which, if any, are real bridges. Returns nothing on other hosts, or if netstat
-fails, where detection falls back to the default-port probe.
+``nettop -L 1 -m tcp -n -J state`` (read-only, no root needed; psutil needs root there,
+and netstat prints nothing under an ad-hoc-signed Python on macOS 27.2.1, ADR 0012).
+This finds candidate ports for nonstandard bridge setups; the WS handshake in ``ws.py``
+then confirms which, if any, are real bridges. Returns nothing on other hosts, or if
+nettop fails, where detection falls back to the default-port probe and says so.
 """
 
 from __future__ import annotations
@@ -18,8 +19,10 @@ from pathlib import Path
 _LISTEN_STATE = "0A"  # TCP_LISTEN in /proc/net/tcp
 PROC_NET_TCP = Path("/proc/net/tcp")
 _PLATFORM = sys.platform  # read through here so tests never patch the interpreter's
-NETSTAT = "/usr/sbin/netstat"  # absolute: no PATH lookup
-_NETSTAT_TIMEOUT = 5.0
+NETTOP = "/usr/bin/nettop"  # absolute: no PATH lookup
+# One sample (-L 1), TCP only, numeric addresses, only the state column.
+_NETTOP_ARGS = ["-L", "1", "-m", "tcp", "-n", "-J", "state"]
+_NETTOP_TIMEOUT = 5.0
 
 
 @dataclass(frozen=True)
@@ -59,24 +62,27 @@ def parse_proc_net_tcp(text: str, *, ipv6: bool = False) -> list[ListeningSocket
     return out
 
 
-def parse_netstat(text: str) -> list[ListeningSocket]:
-    """Pure parse of macOS ``netstat -an -p tcp`` output into listening sockets.
+def parse_nettop(text: str) -> list[ListeningSocket]:
+    """Pure parse of macOS ``nettop -L 1 -m tcp -n -J state`` output into listeners.
 
-    Rows look like ``tcp46  0  0  *.8766  *.*  LISTEN``: the local address is the
-    host and port joined by the last ``.``; ``*`` is every interface. ``tcp46`` is a
-    dual-stack socket, counted as IPv6 the way ``/proc/net/tcp6`` lists it. netstat
-    cuts long IPv6 addresses to fit its column (``fe80::18f2:a81d:.18766``); such a
-    row is kept as reachable, since loopback addresses are short enough to print whole.
+    Socket rows look like ``tcp4 127.0.0.1:8021<->*:*,Listen,`` and
+    ``tcp6 *.8766<->*.*,Listen,``: IPv4 joins host and port with ``:``, IPv6 with the
+    last ``.``; ``*`` is every interface. Process rows (``launchd.1,,``) and other
+    states are skipped.
     """
     out: list[ListeningSocket] = []
     for line in text.splitlines():
-        cols = line.split()
-        if len(cols) < 6 or not cols[0].startswith("tcp") or cols[5] != "LISTEN":
+        fields = line.split(",")
+        if len(fields) < 2 or fields[1] != "Listen":
             continue
-        local = cols[3]
-        if "." not in local:
+        proto, _, flow = fields[0].partition(" ")
+        if proto not in ("tcp4", "tcp6") or "<->" not in flow:
             continue
-        addr, port_text = local.rsplit(".", 1)
+        local = flow.split("<->", 1)[0]
+        sep = ":" if proto == "tcp4" else "."
+        if sep not in local:
+            continue
+        addr, port_text = local.rsplit(sep, 1)
         try:
             port = int(port_text)
         except ValueError:
@@ -85,29 +91,36 @@ def parse_netstat(text: str) -> list[ListeningSocket]:
         try:
             ip = ipaddress.ip_address(host)
         except ValueError:
-            loopback = False  # "*" (every interface), or an address netstat cut off
+            loopback = False  # "*": every interface
         else:
             mapped = getattr(ip, "ipv4_mapped", None)  # ::ffff:127.0.0.1, pre-3.13
             loopback = ip.is_loopback or bool(mapped and mapped.is_loopback)
             loopback = loopback or scope.startswith("lo")
-        ipv6 = cols[0] in ("tcp6", "tcp46")
-        out.append(ListeningSocket(port=port, loopback_only=loopback, ipv6=ipv6))
+        out.append(ListeningSocket(port=port, loopback_only=loopback, ipv6=proto == "tcp6"))
     return out
 
 
-def _run_netstat() -> str | None:
-    """Run the fixed, read-only netstat command; ``None`` on any failure."""
+def _run_nettop() -> str | None:
+    """Run the fixed, read-only nettop command; ``None`` when it gave no usable list.
+
+    Output with no listener at all also counts as a failure: a Mac always has system
+    listeners, so an empty list means the scan was filtered or the format changed, and
+    reading it as "no ports" would hide a running bridge (ADR 0012).
+    """
     try:
         result = subprocess.run(
-            [NETSTAT, "-an", "-p", "tcp"],
+            [NETTOP, *_NETTOP_ARGS],
             capture_output=True,
             text=True,
-            timeout=_NETSTAT_TIMEOUT,
+            # Process names are printed as-is; one that is not UTF-8 must not crash qr.
+            encoding="utf-8",
+            errors="replace",
+            timeout=_NETTOP_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    if result.returncode != 0:
+    if result.returncode != 0 or not parse_nettop(result.stdout):
         return None
     return result.stdout
 
@@ -117,7 +130,7 @@ def _has_proc() -> bool:
 
 
 def _all_listening() -> list[ListeningSocket]:
-    """Every listening socket on this host: ``/proc`` on Linux, netstat on macOS."""
+    """Every listening socket on this host: ``/proc`` on Linux, nettop on macOS."""
     if _has_proc():
         sockets: list[ListeningSocket] = []
         for path, is_v6 in ((PROC_NET_TCP, False), (PROC_NET_TCP.with_name("tcp6"), True)):
@@ -128,8 +141,8 @@ def _all_listening() -> list[ListeningSocket]:
             sockets.extend(parse_proc_net_tcp(text, ipv6=is_v6))
         return sockets
     if _PLATFORM == "darwin":
-        text = _run_netstat()
-        return parse_netstat(text) if text else []
+        text = _run_nettop()
+        return parse_nettop(text) if text else []
     return []
 
 
@@ -151,10 +164,10 @@ def listening_ports(*, include_loopback: bool = False) -> list[int]:
 
 def enumeration_available() -> bool:
     """Can we enumerate listening sockets here? Linux with ``/proc``, or macOS when
-    netstat actually runs (a netstat that fails is no scan, not an empty one)."""
+    nettop gives a usable list (a nettop that fails is no scan, not an empty one)."""
     if _has_proc():
         return True
-    return _PLATFORM == "darwin" and _run_netstat() is not None
+    return _PLATFORM == "darwin" and _run_nettop() is not None
 
 
 def bind_status(port: int) -> str:
