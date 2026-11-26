@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC, catches dependency releases that drop wheels
 
 jobs:
   test:
@@ -20,4 +22,6 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
+      - name: No private cockpit references in the package
+        run: "! grep -rniI 'cockpit' src tests"
       - run: pytest
